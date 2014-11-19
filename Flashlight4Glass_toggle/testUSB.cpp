@@ -1,5 +1,8 @@
 #include "testUSB.h"
 
+const uint32_t EndpointAccess::epDataInIndex  = 1;
+const uint32_t EndpointAccess::epDataOutIndex = 2;
+
 EndpointAccess::EndpointAccess(USBHost *p):
   pUsb(p), ready(false)
 {
@@ -107,6 +110,48 @@ uint32_t EndpointAccess::Init(uint32_t parent, uint32_t port, uint32_t lowspeed)
   if (((USB_DEVICE_DESCRIPTOR*)buf)->idVendor == EA_VID &&
       (((USB_DEVICE_DESCRIPTOR*)buf)->idProduct == EA_PID))
   {
+
+    /* Go through configurations, find first bulk-IN, bulk-OUT EP, fill epInfo and quit */
+    num_of_conf = ((USB_DEVICE_DESCRIPTOR*)buf)->bNumConfigurations;
+
+    printf("EndpointAccess::Init : number of configuration is %lu\r\n", num_of_conf);
+
+    for (uint32_t i = 0; i < num_of_conf; ++i)
+    {
+      ConfigDescParser<0, 0, 0, 0> confDescrParser(this);
+
+      delay(1);
+      rcode = pUsb->getConfDescr(bAddress, 0, i, &confDescrParser);
+
+
+      if (rcode)
+      {
+        goto FailGetConfDescr;
+      }
+
+      if (bNumEP > 2)
+      {
+        break;
+      }
+    }
+
+    if (bNumEP == 3)
+    {
+      // Assign epInfo to epinfo pointer - this time all 3 endpoins
+      rcode = pUsb->setEpInfoEntry(bAddress, 3, epInfo);
+      if (rcode)
+      {
+        goto FailSetDevTblEntry;
+      }
+    }
+
+    // Set Configuration Value
+    rcode = pUsb->setConf(bAddress, 0, bConfNum);
+    if (rcode)
+    {
+      goto FailSetConf;
+    }
+
     printf("EndpointAccess::Init : device ID MATCH\r\n");
     ready = true;
   } else {
@@ -123,15 +168,71 @@ FailSetDevTblEntry:
   printf("EndpointAccess::Init setDevTblEn : ");
   goto Fail;
 
+FailGetConfDescr:
+  printf("EndpointAccess::Init getConf : ");
+  goto Fail;
+
+FailSetConf:
+  printf("EndpointAccess::Init setConf : ");
+  goto Fail;
+
 Fail:
   printf("error code: %lu\r\n", rcode);
   Release();
   return rcode;
 }
 
+void EndpointAccess::EndpointXtract(uint32_t conf, uint32_t iface, uint32_t alt, uint32_t proto, const USB_ENDPOINT_DESCRIPTOR *pep)
+{
+  if (bNumEP == 3)
+  {
+    return;
+  }
+
+  bConfNum = conf;
+
+  uint32_t index = 0;
+  uint32_t pipe = 0;
+
+  if ((pep->bmAttributes & 0x02) == 2)
+  {
+    index = ((pep->bEndpointAddress & 0x80) == 0x80) ? epDataInIndex : epDataOutIndex;
+  }
+
+  // Fill in the endpoint info structure
+  epInfo[index].deviceEpNum = pep->bEndpointAddress & 0x0F;
+  epInfo[index].maxPktSize = pep->wMaxPacketSize;
+
+  printf("EndpointAccess::EndpointXtract : Found new endpoint\r\n");
+  printf("EndpointAccess::EndpointXtract : deviceEpNum: %lu\r\n", epInfo[index].deviceEpNum);
+  printf("EndpointAccess::EndpointXtract : maxPktSize: %lu\r\n", epInfo[index].maxPktSize);
+  printf("EndpointAccess::EndpointXtract : index: %lu\r\n", index);
+
+  if (index == epDataInIndex)
+    pipe = UHD_Pipe_Alloc(bAddress, epInfo[index].deviceEpNum, UOTGHS_HSTPIPCFG_PTYPE_BLK, UOTGHS_HSTPIPCFG_PTOKEN_IN, epInfo[index].maxPktSize, 0, UOTGHS_HSTPIPCFG_PBK_1_BANK);
+  else if (index == epDataOutIndex)
+    pipe = UHD_Pipe_Alloc(bAddress, epInfo[index].deviceEpNum, UOTGHS_HSTPIPCFG_PTYPE_BLK, UOTGHS_HSTPIPCFG_PTOKEN_OUT, epInfo[index].maxPktSize, 0, UOTGHS_HSTPIPCFG_PBK_1_BANK);
+
+  // Ensure pipe allocation is okay
+  if (pipe == 0)
+  {
+    printf("EndpointAccess::EndpointXtract : Pipe allocation failure\r\n");
+    // Enumeration failed, so user should not perform write/read since isConnected will return false
+    return;
+  }
+
+  epInfo[index].hostPipeNum = pipe;
+
+  bNumEP++;
+}
+
 uint32_t EndpointAccess::Release()
 {
   printf("EndpointAccess::Release\r\n");
+
+  // Free allocated host pipes
+  UHD_Pipe_Free(epInfo[epDataInIndex].hostPipeNum);
+  UHD_Pipe_Free(epInfo[epDataOutIndex].hostPipeNum);
 
   // Free allocated USB address
   pUsb->GetAddressPool().FreeAddress(bAddress);
@@ -147,32 +248,18 @@ uint32_t EndpointAccess::Release()
 
 uint32_t EndpointAccess::Poll()
 {
-  //Serial.println("ADK::Poll\r\n");
-
   uint32_t rcode = 0;
-
-  /*if (!bPollEnable)
-  	return 0;
-
-  if (qNextPollTime <= millis())
-  {
-  	qNextPollTime = millis() + 10;
-
-  	const uint32_t const_buff_len = 16;
-  	uint8_t buf[const_buff_len];
-
-  	uint32_t read = epInfo[epInterruptInIndex].maxPktSize;
-
-  	rcode = pUsb->inTransfer(bAddress, epInfo[epInterruptInIndex].deviceEpNum, &read, buf);
-
-  	if (rcode)
-  	{
-  		return rcode;
-  	}
-
-  	if (pRptParser)
-  		pRptParser->Parse((HID*)this, 0, (uint32_t)read, buf);
-  }*/
-
   return rcode;
 }
+
+uint32_t EndpointAccess::read(uint32_t *nreadbytes, uint32_t datalen, uint8_t *dataptr)
+{
+  *nreadbytes = datalen;
+  return pUsb->inTransfer(bAddress, epInfo[epDataInIndex].deviceEpNum, nreadbytes, dataptr);
+}
+
+uint32_t EndpointAccess::write(uint32_t datalen, uint8_t *dataptr)
+{
+  return pUsb->outTransfer(bAddress, epInfo[epDataOutIndex].deviceEpNum, datalen, dataptr);
+}
+

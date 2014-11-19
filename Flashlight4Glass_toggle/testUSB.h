@@ -3,13 +3,14 @@
 
 #include <Usb.h>
 #include <Arduino.h>
+#include <confdescparser.h>
 
 #define EA_VID   0x4207
 #define EA_PID   0x20A0
 
 #define EA_MAX_ENDPOINTS 3 //endpoint 0, bulk_IN, bulk_OUT
 
-class EndpointAccess : public USBDeviceConfig
+class EndpointAccess : public USBDeviceConfig, public UsbConfigXtracter
 {
   protected:
     static const uint32_t epDataInIndex;			// DataIn endpoint index
@@ -30,6 +31,9 @@ class EndpointAccess : public USBDeviceConfig
   public:
     EndpointAccess(USBHost *p);
 
+    // Methods for receiving and sending data
+    uint32_t read(uint32_t *nreadbytes, uint32_t datalen, uint8_t *dataptr);
+    uint32_t write(uint32_t datalen, uint8_t *dataptr);
 
     // USBDeviceConfig implementation
     virtual uint32_t Init(uint32_t parent, uint32_t port, uint32_t lowspeed);
@@ -44,6 +48,8 @@ class EndpointAccess : public USBDeviceConfig
       return ready;
     };
 
+    // UsbConfigXtracter implementation
+    virtual void EndpointXtract(uint32_t conf, uint32_t iface, uint32_t alt, uint32_t proto, const USB_ENDPOINT_DESCRIPTOR *ep);
 };
 
 #endif

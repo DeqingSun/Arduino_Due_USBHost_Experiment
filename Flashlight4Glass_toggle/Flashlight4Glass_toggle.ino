@@ -2,9 +2,6 @@
 #include <Usb.h>
 #include "testUSB.h"
 
-#define TARGET_VID 
-#define TARGET_PID 
-
 USBHost usb;
 EndpointAccess mEA(&usb);
 
@@ -12,47 +9,29 @@ void setup() {
   Serial.begin(115200);
 }
 
-unsigned char last_state = 0xFF;
-boolean board_plugged = false;
-uint32_t target_device_addr = 0;
-boolean target_device_found = false;
+unsigned long previousMillis = 0;       
+const long interval = 1000;         
 
 void loop() {
   byte rcode;
 
   usb.Task();
 
- /* unsigned char current_state = usb.getUsbTaskState();
+  unsigned long currentMillis = millis();
+  uint32_t current_state = usb.getUsbTaskState();
 
-  if (current_state != last_state) {
+  if (current_state == USB_STATE_RUNNING) {
+    if (mEA.isReady()) {
+      if (currentMillis - previousMillis >= interval) {
+        previousMillis = currentMillis;
 
-    //print_USB_state(current_state);
-
-    switch (current_state) {
-
-
-      case USB_DETACHED_SUBSTATE_WAIT_FOR_DEVICE:
-        if (board_plugged == true) {
-          target_device_found = false;
-          board_plugged = false;
-          usb.ReleaseDevice(1);
-        }
-        break;
-
-
-      case USB_STATE_RUNNING:
-        if (board_plugged == false) {
-          Serial.println("!!!!BOARD PLUGGED");
-          usb.ForEachUsbDevice(&CheckTargetDevice);
-        }
-
-        board_plugged = true;
-        break;
-
+        uint8_t buf[8] = {0x80};
+        mEA.write(1, buf);
+        Serial.println("TOGGLE LED");
+      }
     }
+  }
 
-    last_state = current_state;
-  }*/
 
 }
 
