@@ -1,0 +1,6 @@
+default/*
+*.aws
+*.dbk
+*.sdf
+!default/*.DSN
+!default/Makefile
