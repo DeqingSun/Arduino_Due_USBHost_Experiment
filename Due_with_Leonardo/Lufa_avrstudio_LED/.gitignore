@@ -1,0 +1,18 @@
+##########################
+## Atmel Studio 6
+##########################
+
+*.d
+*.eep
+*.elf
+*.hex
+*.lss
+*.map
+*.o
+*.srec
+*.mk
+*.S
+Makefile
+TcfTransactionLog.csv
+
+
